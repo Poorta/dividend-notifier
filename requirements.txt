@@ -1,0 +1,12 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+akshare>=1.14.0
+openpyxl>=3.1.0
+reportlab>=4.0
+yagmail>=0.15.0
+python-dotenv>=1.0.0
+pandas>=2.2.0
+sqlalchemy>=2.0.0
+apscheduler>=3.10.0
+jinja2>=3.1.0
+pywebview>=5.0

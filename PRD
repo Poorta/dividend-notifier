@@ -1,0 +1,543 @@
+# Dividend Notifier — 产品需求文档 (PRD)
+
+> 版本: v2.1 | 作者: Noah Chen | 更新: 2026-06-16
+
+---
+
+## 1. 项目概述
+
+### 1.1 产品定位
+
+Dividend Notifier 是一款面向个人投资者的**开源高股息股票每日分析报告工具**。系统每日自动从 AkShare 获取A股全量数据，筛选出具备稳定分红记录的高股息标的，生成**Excel (.xlsx) 表格 + PDF 报告**，通过邮件附件推送至订阅用户。
+
+### 1.2 目标用户
+
+| 用户画像 | 特征 | 核心诉求 |
+|---------|------|---------|
+| 个人价值投资者 | 偏好稳定分红标的，持有周期长 | 每日自动化获取高股息股票汇总，手机端可查看 |
+| 量化入门者 | 有编程基础，关注股息因子 | 开源可拓展，学习量化选股与报表生成逻辑 |
+| 简历展示受众（面试官/HR） | 关注项目完整性与工程能力 | 体现全栈开发 + 报表工程 + 自动化运维能力 |
+
+### 1.3 项目目标
+
+| 维度 | 目标 |
+|------|------|
+| **功能完整度** | 实现 "数据获取 → 多指标计算 → Excel+PDF生成 → 邮件附件推送" 闭环 |
+| **用户可配置** | 筛选阈值、推送时间、收件人、颜色规则等均通过 `.env` 自由配置，无需改代码 |
+| **工程规范** | 标准 FastAPI 项目结构、SQLite 数据持久化、launchd 定时调度 |
+| **报表质量** | 行业分组、颜色编码、红利税脚注，对标专业投研表格 |
+| **开源展示** | GitHub 公开仓库，README 包含架构图、安装指南、效果截图 |
+| **简历价值** | 体现 Python 后端 + 报表工程 + DevOps 全栈能力 |
+
+---
+
+## 2. 功能需求
+
+### 2.1 核心功能模块
+
+#### F1 — 高股息股票数据获取与计算引擎
+
+| 项目 | 说明 |
+|------|------|
+| **数据源** | AkShare（免费开源，覆盖A股全量） |
+| **覆盖行业** | 银行、保险、电力、煤炭、石油、白酒、中药、高速公路、铁路、建筑、通信、家电、食品饮料等 |
+| **筛选策略** | **用户完全可配置**。所有筛选阈值通过 `.env` 自由调节，支持多维度组合筛选（见 §6 环境变量），用户无需修改代码即可切换策略（如"全覆盖模式"或"严筛模式"） |
+| **默认筛选** | 连续派现年限 ≥ 3 年；如需严筛可自行开启 `MIN_DIVIDEND_YIELD`、`MAX_PE_RATIO`、`MAX_PB_RATIO` 等阈值 |
+| **计算指标** | 见 §5.1 完整字段列表（共13列核心指标） |
+| **数据缓存** | 交易日数据写入 SQLite，非交易日使用最近交易日缓存 |
+
+#### F2 — Excel 报表生成 (openpyxl / xlsxwriter)
+
+| 项目 | 说明 |
+|------|------|
+| **生成库** | openpyxl（支持样式、条件格式、合并单元格） |
+| **输出格式** | `.xlsx` 文件，手机 WPS/Office 可直接打开 |
+| **报表结构** | ① 标题行（日期 + 报表名称） ② 行业分组汇总表 ③ 数据明细表 ④ 红利税脚注 |
+| **行业分组** | 按行业分组，每组首行高亮分隔，组间留空行 |
+| **颜色编码** | 见 §8 颜色编码规则 |
+| **列宽自适应** | 自动根据内容调整列宽 |
+| **冻结窗格** | 冻结标题行 + 行业列，方便手机横向滚动查看 |
+
+#### F3 — PDF 报告生成 (ReportLab / WeasyPrint)
+
+| 项目 | 说明 |
+|------|------|
+| **生成库** | ReportLab（纯 Python，无外部依赖） |
+| **输出格式** | `.pdf` 文件，A4 横向排版 |
+| **报表内容** | 与 Excel 内容一致：标题 + 行业分组表 + 数据明细 + 脚注 |
+| **颜色编码** | 与 Excel 保持一致的红/绿色标注 |
+| **分页控制** | 行业组尽量不跨页，表头每页重复 |
+
+#### F4 — 邮件附件推送
+
+| 项目 | 说明 |
+|------|------|
+| **邮件服务** | yagmail（基于 SMTP），支持 QQ邮箱 / 163邮箱 / Gmail |
+| **推送策略** | 每个交易日 08:30 发送，附件为 `.xlsx` + `.pdf` |
+| **邮件正文** | 简洁摘要：日期、覆盖股票数、平均股息率、行业分布、免责声明 |
+| **订阅管理** | 支持多收件人列表配置 |
+
+#### F5 — 定时调度
+
+| 项目 | 说明 |
+|------|------|
+| **调度方式** | macOS launchd plist 配置 |
+| **执行时间** | **用户可配置**。通过 `.env` 中的 `SEND_HOUR` + `SEND_MINUTE` 自由设定（默认 08:30 CST） |
+| **交易日历** | 通过 AkShare 获取交易日历，非交易日自动跳过 |
+| **容错机制** | 单次失败不影响下次执行，失败日志记录 |
+| **配置生效** | 用户修改 `.env` 时间后运行 `scripts/update_launchd.py` 自动更新 plist 并重新加载 launchd |
+
+#### F6 — Web API 服务
+
+| 项目 | 说明 |
+|------|------|
+| **框架** | FastAPI |
+| **主要端点** | `GET /` 服务状态 / `GET /stocks` 查询当日结果 / `GET /report` 下载当日报表 / `POST /trigger` 手动触发生成+推送 / `GET /history?date=` 历史查询 |
+| **文档** | 自动生成 Swagger UI (`/docs`) |
+| **认证** | 本地部署无需认证（MVP阶段） |
+
+### 2.2 功能优先级
+
+| 优先级 | 功能 | 理由 |
+|--------|------|------|
+| P0 | F1 数据引擎 + F2 Excel生成 + F4 邮件推送 + F5 定时调度 | 核心闭环，缺一则项目不可用 |
+| P1 | F3 PDF生成 | 增强可读性，双格式输出 |
+| P1 | F6 Web API | 增强可展示性与可交互性 |
+| P2 | 回测模块（近3年等权组合收益） | 简历加分项 |
+| P3 | Telegram/微信通知渠道、Docker 镜像 | 拓展用户覆盖面 |
+
+---
+
+## 3. 非功能需求
+
+| 类别 | 要求 |
+|------|------|
+| **可靠性** | 交易日推送成功率 ≥ 95%，失败自动重试1次 |
+| **性能** | 单次数据获取+计算+Excel生成+PDF生成+邮件发送全流程 ≤ 60秒 |
+| **可维护性** | 代码模块化（数据层 / 计算层 / 报表层 / 推送层分离），关键配置可热更新 |
+| **手机适配** | Excel 冻结窗格 + 自适应列宽；PDF A4横向单页排版；确保移动端可读 |
+| **数据安全** | 邮箱密码不在代码中硬编码，使用环境变量 `.env` |
+| **开源合规** | MIT License，README 标注数据来源（AkShare） |
+
+---
+
+## 4. 技术架构
+
+### 4.1 技术栈
+
+| 层级 | 技术选型 | 理由 |
+|------|---------|------|
+| 后端框架 | FastAPI (Python 3.11+) | 高性能异步、自动API文档、适合展示 |
+| 数据库 | SQLite | 零部署依赖、本地轻量、够用 |
+| 数据源 | AkShare | 免费开源、覆盖A股全量、活跃维护 |
+| Excel生成 | openpyxl | 支持样式/条件格式/合并单元格/冻结窗格 |
+| PDF生成 | ReportLab | 纯Python、无外部依赖、支持中文字体 |
+| 邮件服务 | yagmail | 简化 SMTP 操作、支持附件 |
+| 任务调度 | macOS launchd | 原生支持、零额外依赖 |
+| 包管理 | pip + requirements.txt | 标准化 |
+
+### 4.2 项目目录结构
+
+```
+dividend-notifier/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI 入口
+│   ├── config.py            # 配置管理（.env 加载）
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── stock.py         # 数据模型
+│   │   └── database.py      # SQLite 初始化 + CRUD
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── fetcher.py       # AkShare 数据获取
+│   │   ├── calculator.py    # 衍生指标计算（YTD收益、权益日等）
+│   │   ├── screener.py      # 筛选+排序逻辑
+│   │   └── mailer.py        # yagmail 邮件附件发送
+│   ├── reports/
+│   │   ├── __init__.py
+│   │   ├── excel_report.py  # openpyxl Excel 生成（行业分组+颜色编码）
+│   │   └── pdf_report.py    # ReportLab PDF 生成
+│   ├── templates/
+│   │   └── email.txt        # 邮件正文模板
+│   └── utils/
+│       ├── __init__.py
+│       ├── calendar.py      # 交易日历判断
+│       ├── colors.py        # 颜色编码规则模块
+│       └── logger.py        # 日志配置
+├── scripts/
+│   ├── daily_job.py         # launchd 调用的日度任务脚本
+│   └── update_launchd.py    # 根据 .env 自动生成/更新 plist 并 reload launchd
+├── data/
+│   └── dividend_notifier.db # SQLite 数据库文件
+├── output/                  # 生成的 Excel + PDF 文件暂存
+├── logs/                    # 运行日志
+├── tests/                   # 单元测试
+├── .env.example             # 环境变量模板
+├── requirements.txt
+├── com.dividend.notifier.plist  # launchd 配置
+├── README.md
+└── LICENSE
+```
+
+### 4.3 数据流
+
+```
+[交易日 08:30 launchd 触发]
+        ↓
+[daily_job.py 启动]
+        ↓
+[Fetcher: AkShare 全量获取]
+  - 个股基本面 (PE/PB/市值/行业)
+  - 分红数据 (每股分红/派现年限/权益日)
+  - 行情数据 (最新价/YTD涨跌幅)
+        ↓
+[Calculator: 衍生指标计算]
+  - 股息率 = 每股分红 / 最新价
+  - YTD涨跌幅 = (最新价 - 年初价) / 年初价
+  - 股息率对股价影响分析
+        ↓
+[Screener: 筛选+分组+排序]
+  - 连续派现 ≥ 3年
+  - 按行业分组
+  - 组内按股息率降序排列
+        ↓
+[Database: 写入 SQLite]
+        ↓
+[Report Generator: Excel + PDF]
+  - openpyxl → .xlsx (行业分组 + 颜色编码 + 冻结窗格)
+  - ReportLab → .pdf (A4横向 + 表头重复 + 中文字体)
+        ↓
+[Mailer: yagmail 发送附件]
+  - 附件: dividend_report_20260616.xlsx + dividend_report_20260616.pdf
+        ↓
+[Logger: 记录执行日志 + 清理 output/ 历史文件]
+```
+
+---
+
+## 5. 数据模型
+
+### 5.1 股票数据表 (stock_dividend_data)
+
+对标参考表格「最新养老收息红利股汇总」的完整字段：
+
+| # | 字段名 | 类型 | 中文名称 | 说明 |
+|---|--------|------|---------|------|
+| 1 | `code` | TEXT | 代码 | 6位股票代码 (e.g. "601398") |
+| 2 | `name` | TEXT | 股票名称 | (e.g. "工商银行") |
+| 3 | `industry` | TEXT | 行业 | 行业分组标签 |
+| 4 | `market_cap` | REAL | 市值(亿元) | 总市值 |
+| 5 | `consecutive_years` | INTEGER | 连续派现年限 | 最近连续分红的年数 |
+| 6 | `latest_price` | REAL | 最新价 | 最新收盘价 |
+| 7 | `annual_dividend` | REAL | 年报/股红利 | 2025年年报每股分红(元) |
+| 8 | `dividend_yield` | REAL | 当期股息率(%) | = 年报/股红利 ÷ 最新价 × 100 |
+| 9 | `ex_dividend_date` | TEXT | 新权益日 | 最近一次除权除息日 |
+| 10 | `year_end_price` | REAL | 年末股息价 | 2025-12-31 的收盘价 |
+| 11 | `ytd_return` | REAL | 年初至今涨跌幅(%) | 2026-01-01 以来的涨跌幅 |
+| 12 | `dividend_price_impact` | TEXT | 股息率对股价 | 除权后填权情况分析 |
+| 13 | `dividend_detail` | TEXT | 分红明细(股/息) | 送股/转增/派息明细 |
+| 14 | `date` | TEXT | 数据日期 | YYYY-MM-DD |
+
+**索引**: `(date, code)` 联合唯一索引
+
+### 5.2 推送日志表 (push_logs)
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PK | 自增主键 |
+| date | TEXT | 推送日期 |
+| stock_count | INTEGER | 覆盖股票数量 |
+| recipients | TEXT | 收件人列表 (JSON) |
+| excel_path | TEXT | 生成的 xlsx 文件路径 |
+| pdf_path | TEXT | 生成的 pdf 文件路径 |
+| status | TEXT | success / failed |
+| error_msg | TEXT | 失败原因 |
+| duration_ms | INTEGER | 全流程耗时（毫秒） |
+| created_at | TEXT | 记录创建时间 |
+
+---
+
+## 6. 用户可配置项 (.env)
+
+> **核心理念**：所有筛选条件、推送时间、颜色阈值均由用户通过 `.env` 自由配置，**无需修改任何代码**。复制 `.env.example` 为 `.env` 后按需调整即可。
+
+```env
+# ============================================================
+# Dividend Notifier 用户配置文件
+# 复制此文件为 .env 后按需修改，所有参数均可自由调整
+# ============================================================
+
+# === 数据源 ===
+# AkShare 无需 API Key，如遇网络问题可配置代理
+HTTP_PROXY=
+HTTPS_PROXY=
+
+# === 邮件配置 ===
+MAIL_USERNAME=your_email@qq.com
+MAIL_PASSWORD=your_smtp_auth_code        # QQ邮箱需开启SMTP获取授权码
+MAIL_HOST=smtp.qq.com
+MAIL_PORT=465
+
+# === 收件人列表 (逗号分隔) ===
+RECIPIENTS=user1@example.com,user2@example.com
+
+# === 推送时间 (用户自由设定) ===
+SEND_HOUR=8                              # 推送小时 (0-23)
+SEND_MINUTE=30                           # 推送分钟 (0-59)
+
+# === 筛选阈值 (全部可选，设为空或注释即关闭该条件) ===
+# -- 基础门槛 --
+MIN_CONSECUTIVE_YEARS=3                  # 最低连续派现年数 (设为0关闭)
+MIN_MARKET_CAP=                          # 最低市值(亿元)，留空不限制
+
+# -- 价值筛选 (可选开启) --
+MIN_DIVIDEND_YIELD=                      # 最低股息率(%)，eg. 3.0。留空不限制
+MAX_PE_RATIO=                            # 最高市盈率，eg. 20。留空不限制
+MAX_PB_RATIO=                            # 最高市净率，eg. 2.0。留空不限制
+
+# -- 排除条件 (可选) --
+EXCLUDE_ST=1                             # 排除ST股票 (1=是, 0=否)
+EXCLUDE_NEW_LISTING_DAYS=365             # 排除上市不足N天的新股
+
+# === 颜色编码阈值 (可自定义) ===
+# 股息率颜色
+COLOR_DIV_YIELD_RED=5.0                  # 股息率 >= 此值 → 红色 (看多)
+COLOR_DIV_YIELD_GREEN=3.0                # 股息率 <  此值 → 绿色 (警示)
+
+# YTD涨跌幅颜色
+COLOR_YTD_RED=0.0                        # YTD >= 此值 → 红色
+COLOR_YTD_GREEN=-5.0                     # YTD <  此值 → 绿色
+
+# 连续派现颜色
+COLOR_CONSECUTIVE_RED=10                 # 连续年数 >= 此值 → 红色
+COLOR_CONSECUTIVE_GREEN=5                # 连续年数 <  此值 → 绿色
+
+# === 输出配置 ===
+OUTPUT_DIR=./output                      # Excel/PDF 生成目录
+OUTPUT_FORMAT=xlsx,pdf                   # 输出格式: xlsx, pdf, both (逗号分隔)
+PDF_PAGE_ORIENTATION=landscape           # landscape: 横向A4; portrait: 纵向A4
+PDF_PAGE_SIZE=A4
+PDF_FONT_PATH=                           # PDF 中文字体路径 (留空自动使用 macOS 系统黑体)
+
+# === 运行模式 ===
+LOG_LEVEL=INFO
+```
+
+---
+
+## 7. launchd 配置
+
+> **用户无需手动编辑 XML**。修改 `.env` 中的 `SEND_HOUR` / `SEND_MINUTE` 后，运行 `python scripts/update_launchd.py` 即可自动生成 plist 并重新加载。
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dividend.notifier</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/venv/bin/python</string>
+        <string>/path/to/dividend-notifier/scripts/daily_job.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>8</integer>    <!-- 从 .env SEND_HOUR 自动生成 -->
+        <key>Minute</key><integer>30</integer>  <!-- 从 .env SEND_MINUTE 自动生成 -->
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/path/to/dividend-notifier/logs/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/path/to/dividend-notifier/logs/stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
+```
+
+安装命令：
+```bash
+# 初次安装
+python scripts/update_launchd.py
+
+# 修改 .env 推送时间后，重新运行即可
+python scripts/update_launchd.py
+```
+
+---
+
+## 8. Excel 报表设计规范
+
+### 8.1 报表结构
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Row 1: 最新养老收息红利股汇总  2026.06.16                         │
+│  Row 2: (空行)                                                    │
+├──────────────────────────────────────────────────────────────────┤
+│  Row 3:  行业  │ 股票名称 │ 代码  │ 市值 │ 连续 │ 最新价 │ ...   │  ← 表头 (冻结)
+├──────────────────────────────────────────────────────────────────┤
+│  Row 4:  【银行】                                                  │  ← 行业分隔行 (深色背景)
+│  Row 5:  工商银行 │ 工商银行 │601398│21000│  18  │ 6.80  │ ...   │
+│  Row 6:  农业银行 │ 农业银行 │601288│15000│  16  │ 5.20  │ ...   │
+│  ...                                                              │
+│  Row N:  (空行)                                                   │  ← 行业组分隔空行
+│  Row N+1:【保险】                                                  │  ← 行业分隔行
+│  ...                                                              │
+│  (最后若干行)                                                      │
+│  免责声明：本报告仅供信息参考，不构成投资建议。投资有风险，入市需谨慎。 │
+│  持有期≤1个月：红利税20% │ 持有期1个月~1年：红利税10% │ >1年：免税  │
+│  Powered by AkShare | GitHub: https://github.com/xxx/dividend-notifier │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 颜色编码规则 (utils/colors.py)
+
+中国股市惯例：涨=红，跌=绿。
+
+| 指标 | 绿色（看空/警示） | 无色/默认（中性） | 红色（看多/正面） |
+|------|:--:|:--:|:--:|
+| **股息率** | `< 3%` | `3% ~ 5%` | `> 5%` |
+| **YTD涨跌幅** | `< -5%` | `-5% ~ 0%` | `> 0%` |
+| **连续派现年限** | `< 5年` | `5 ~ 10年` | `> 10年` |
+
+具体实现：
+- 单元格**字体颜色**应用上述规则
+- 行业分隔行：深蓝底 + 白字加粗
+- 表头行：浅灰底 + 加粗
+- 脚注行：浅灰底 + 小号字体 + 斜体
+
+### 8.3 Excel 格式规范
+
+| 规范项 | 设置 |
+|--------|------|
+| 冻结窗格 | 冻结至数据首行（标题行 + 表头行始终可见） |
+| 列宽 | 自动适应内容宽度（最小8字符，最大20字符） |
+| 数字格式 | 股息率/YTD保留2位小数；市值保留1位小数；最新价保留2位小数 |
+| 对齐方式 | 代码/数字列居中；名称/行业列左对齐 |
+| 边框 | 数据区域浅灰细线边框 |
+
+---
+
+## 9. PDF 报表设计规范
+
+### 9.1 页面设置
+
+| 设置项 | 值 |
+|--------|-----|
+| 页面尺寸 | A4 横向 (297mm × 210mm) |
+| 边距 | 上下15mm，左右10mm |
+| 中文字体 | **macOS 系统黑体 (Heiti SC)**，无需额外安装。ReportLab 通过 `PDF_FONT_PATH` 指定字体路径，默认自动查找 `/System/Library/Fonts/STHeiti Light.ttc` 或 `/System/Library/Fonts/PingFang.ttc`，Windows/Linux 需手动配置 |
+| 字体大小 | 标题 12pt，表头 9pt，数据 8pt，脚注 7pt |
+| 分页策略 | 行业组不跨页；每页顶部重复表头行 |
+
+### 9.2 PDF 颜色映射
+
+从 Excel 颜色编码规则同步映射：
+- 股息率 > 5%：红色字体
+- 股息率 < 3%：绿色字体
+- YTD > 0%：红色字体
+- YTD < -5%：绿色字体
+- 行业分隔行：深灰底 + 白色粗体
+
+---
+
+## 10. API 接口设计
+
+| 方法 | 路径 | 描述 | 参数 |
+|------|------|------|------|
+| GET | `/` | 服务健康检查 | - |
+| GET | `/stocks` | 查询当日筛选结果 (JSON) | `?date=YYYY-MM-DD` (optional) |
+| GET | `/report/xlsx` | 下载当日 Excel 报表 | `?date=YYYY-MM-DD` (optional) |
+| GET | `/report/pdf` | 下载当日 PDF 报表 | `?date=YYYY-MM-DD` (optional) |
+| POST | `/trigger` | 手动触发：生成报表 + 邮件推送 | - |
+| GET | `/history` | 历史推送记录 | `?start=&end=` |
+| GET | `/docs` | Swagger API 文档 | - |
+
+---
+
+## 11. 邮件格式
+
+```
+主题: 📊 Dividend Notifier · 养老收息红利股汇总 2026.06.16
+
+正文:
+今日覆盖高股息标的共 XX 只，分布在 X 个行业。
+平均股息率 X.X%，股息率 > 5% 的共 X 只。
+
+行业分布概况：
+银行 (X只) | 煤炭 (X只) | 电力 (X只) | ...
+
+📎 附件 (手机可直接打开查看)：
+  · dividend_report_20260616.xlsx
+  · dividend_report_20260616.pdf
+
+⚠️ 免责声明：本报告仅供信息参考，不构成投资建议。投资有风险，入市需谨慎。
+持有期≤1个月：红利税20% | 1个月~1年：红利税10% | >1年：免税
+
+Powered by AkShare | GitHub: https://github.com/xxx/dividend-notifier
+```
+
+---
+
+## 12. 里程碑计划
+
+| 阶段 | 内容 | 产出物 |
+|------|------|--------|
+| **M1: 核心闭环** | AkShare数据获取 + 衍生指标计算 + 筛选+排序 + openpyxl Excel生成 + yagmail邮件附件推送 | 手动运行可完成一次完整推送 |
+| **M2: PDF报表** | ReportLab PDF生成（横向A4 + 中文字体 + 颜色编码） | 双格式输出（xlsx + pdf） |
+| **M3: 工程化** | SQLite持久化 + 配置管理 + 颜色编码模块 + 日志系统 | 标准Python项目结构 |
+| **M4: 定时调度** | launchd配置 + 交易日历 + 容错 | 无人值守自动运行 |
+| **M5: API服务** | FastAPI包装 + Swagger文档 + 报表下载端点 | 可交互网页入口 |
+| **M6: 开源发布** | README + 架构图 + 安装指南 + 样例截图 + GitHub | 简历可引用链接 |
+
+---
+
+## 13. 风险与应对
+
+| 风险 | 影响 | 应对 |
+|------|------|------|
+| AkShare 接口变更 | 数据获取失败 | 代码层 try-except + 日志告警；关注 AkShare 更新日志 |
+| openpyxl 大文件性能 | Excel 生成耗时过长 | 限制覆盖标的 ≤ 200只；按需分 sheet |
+| macOS 系统字体路径差异 | PDF 中文显示异常 | 自动探测多个系统字体路径（Heiti SC → PingFang → 手动配置回退） |
+| QQ邮箱 SMTP 限频/附件大小限制 | 邮件发送失败 | 控制附件总量 < 5MB；压缩 PDF 图片 |
+| launchd 静默失败 | 用户未收到通知 | 日志落地 + 推送日志表记录 |
+| 代理网络问题 | AkShare 502 | 支持配置 HTTP_PROXY；故障时跳过并记录 |
+
+---
+
+## 14. 附录
+
+### 14.1 竞品参考（用于README对比说明）
+
+| 工具 | 区别 |
+|------|------|
+| 同花顺/东方财富 选股器 | DN 开源、自动化推送、Excel/PDF双格式、可定制筛选逻辑 |
+| 各类微信公众号推送 | DN 完全开源、数据可审计、无广告推广 |
+| JoinQuant / RiceQuant | DN 轻量、零学习成本、本地部署、隐私安全 |
+
+### 14.2 筛选策略扩展（P2 规划）
+
+- **红利指数跟踪**: 对标中证红利指数 (000922)，计算跟踪误差
+- **回测模块**: 按筛选结果构建等权组合，回测近3年收益
+- **估值分位**: 添加PE/PB历史分位，辅助判断估值高低
+- **多策略模板**: 养老收息 / 红利成长 / 高股息低波动 三种预设筛选策略
+
+### 14.3 Python 依赖清单 (requirements.txt)
+
+```
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+akshare>=1.14.0
+openpyxl>=3.1.0
+reportlab>=4.0
+yagmail>=0.15.0
+python-dotenv>=1.0.0
+pandas>=2.2.0
+```

@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Dividend Notifier — 报表中心{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+  <!-- 操作按钮 -->
+  <div class="btn-group">
+    {% if grouped %}
+    <a href="/api/report/xlsx" class="btn btn-primary">下载 Excel</a>
+    <a href="/api/report/pdf" class="btn btn-outline">下载 PDF</a>
+    {% endif %}
+    <a href="#" class="btn btn-outline" onclick="triggerRefresh(event)">刷新数据</a>
+  </div>
+
+  <!-- 有数据时：日期 + 选择器 -->
+  {% if grouped %}
+  <div class="stats" style="grid-template-columns: 1fr;">
+    <div class="stat-card">
+      <div class="stat-value">{{ today }}</div>
+      <div class="stat-label">报表日期 · {{ total_stocks }}只 · {{ industry_count }}行业 · 均息{{ avg_yield }}%</div>
+    </div>
+  </div>
+
+  <div class="date-picker">
+    {% if prev_date %}
+    <a href="/reports?date={{ prev_date }}" class="btn btn-outline btn-sm">&lt; {{ prev_date }}</a>
+    {% else %}
+    <span class="btn btn-outline btn-sm" style="visibility:hidden;">&lt;</span>
+    {% endif %}
+    <span class="date-display">{{ today }}</span>
+    {% if next_date %}
+    <a href="/reports?date={{ next_date }}" class="btn btn-outline btn-sm">{{ next_date }} &gt;</a>
+    {% else %}
+    <span class="btn btn-outline btn-sm" style="visibility:hidden;">&gt;</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- 行业分组预览表格 -->
+  {% if grouped %}
+  {% for industry, stocks in grouped.items() %}
+  <div class="card" style="padding: 10px 0; overflow: hidden;">
+    <h2 style="margin: 0 14px 10px; padding-bottom: 8px;">{{ industry }} ({{ stocks|length }}只)</h2>
+    <div class="table-wrapper" style="margin: 0; padding: 0;">
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>代码</th>
+            <th>市值(亿)</th>
+            <th>连续派现</th>
+            <th>最新价</th>
+            <th>上年分红</th>
+            <th>当前股息率</th>
+            <th>除权除息日</th>
+            <th>上年末股价</th>
+            <th>今年涨跌</th>
+            <th>4%</th>
+            <th>5%</th>
+            <th>6%</th>
+            <th>7%</th>
+            <th>8%</th>
+            <th>分红明细</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in stocks %}
+          <tr>
+            <td>{{ s.name }}</td>
+            <td>{{ s.code }}</td>
+            <td>{{ "%.0f"|format(s.market_cap or 0) }}</td>
+            <td class="{% if s.consecutive_years and s.consecutive_years >= colors.cons_red %}text-red{% elif s.consecutive_years and s.consecutive_years < colors.cons_green %}text-green{% endif %}">
+              {{ s.consecutive_years }}
+            </td>
+            <td>{{ "%.2f"|format(s.latest_price or 0) }}</td>
+            <td>{{ "%.2f"|format(s.annual_dividend or 0) }}</td>
+            <td class="{% if s.dividend_yield and s.dividend_yield >= colors.div_yield_red %}text-red{% elif s.dividend_yield and s.dividend_yield < colors.div_yield_green %}text-green{% endif %}">
+              {{ "%.2f"|format(s.dividend_yield or 0) }}%
+            </td>
+            <td>{{ s.ex_dividend_date }}</td>
+            <td>{% if s.year_end_price and s.year_end_price > 0 %}{{ "%.2f"|format(s.year_end_price) }}{% else %}--{% endif %}</td>
+            <td class="{% if s.ytd_return and s.ytd_return >= colors.ytd_red %}text-red{% elif s.ytd_return and s.ytd_return < colors.ytd_green %}text-green{% endif %}">
+              {% if s.year_end_price and s.year_end_price > 0 %}{{ "%.2f"|format(s.ytd_return or 0) }}%{% else %}--{% endif %}
+            </td>
+            <td>{{ "%.2f"|format(s.yield_price_4 or 0) }}</td>
+            <td>{{ "%.2f"|format(s.yield_price_5 or 0) }}</td>
+            <td>{{ "%.2f"|format(s.yield_price_6 or 0) }}</td>
+            <td>{{ "%.2f"|format(s.yield_price_7 or 0) }}</td>
+            <td>{{ "%.2f"|format(s.yield_price_8 or 0) }}</td>
+            <td>{{ s.dividend_detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="card banner-empty">
+    暂无报表数据<br>
+    <span style="font-size:12px; color: var(--text-muted);">请先运行一次数据流水线来生成报表</span>
+  </div>
+  {% endif %}
+
+  <!-- 红利税说明 -->
+  <div class="footer">
+    <p>免责声明：本报告仅供信息参考，不构成投资建议。投资有风险，入市需谨慎。</p>
+    <p>红利税规则：持股 ≤1个月 20% | 1个月~1年 10% | ＞1年 免税</p>
+    <p>Powered by AkShare · Dividend Notifier · MIT License</p>
+  </div>
+
+<!-- Processing toast -->
+<div class="processing-toast" id="procToast">正在生成报表...</div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var pollTimer = null;
+
+async function triggerRefresh(e) {
+  e.preventDefault();
+  var btn = e.currentTarget;
+  var orig = btn.innerHTML;
+  btn.classList.add('is-loading');
+  btn.textContent = '启动中...';
+  btn.style.pointerEvents = 'none';
+
+  try {
+    var resp = await fetch('/api/trigger', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      showToast('任务已启动，正在获取最新数据...', 'success');
+      showProcessing(true);
+      startPolling(btn, orig);
+    } else {
+      showToast('刷新失败', 'error');
+      btn.classList.remove('is-loading');
+      btn.innerHTML = orig;
+      btn.style.pointerEvents = '';
+    }
+  } catch(e) {
+    showToast('请求失败', 'error');
+    btn.classList.remove('is-loading');
+    btn.innerHTML = orig;
+    btn.style.pointerEvents = '';
+  }
+}
+
+function showProcessing(show) {
+  var toast = document.getElementById('procToast');
+  if (toast) toast.style.display = show ? 'block' : 'none';
+}
+
+function startPolling(btn, orig) {
+  var attempts = 0;
+  if (pollTimer) clearInterval(pollTimer);
+
+  pollTimer = setInterval(async function() {
+    attempts++;
+    try {
+      var resp = await fetch('/api/status');
+      var status = await resp.json();
+
+      if (status.last_push && status.last_push.status === 'success') {
+        clearInterval(pollTimer); pollTimer = null;
+        showProcessing(false);
+        btn.classList.remove('is-loading');
+        btn.innerHTML = orig;
+        btn.style.pointerEvents = '';
+        showToast('报表已生成，正在刷新...', 'success');
+        setTimeout(function() { location.reload(); }, 500);
+      } else if (status.last_push && status.last_push.status === 'failed') {
+        clearInterval(pollTimer); pollTimer = null;
+        showProcessing(false);
+        btn.classList.remove('is-loading');
+        btn.innerHTML = orig;
+        btn.style.pointerEvents = '';
+        var message = status.last_push.error_msg || '生成失败，请稍后重试';
+        showToast(message, 'error');
+      } else if (attempts >= 30) {
+        clearInterval(pollTimer); pollTimer = null;
+        showProcessing(false);
+        btn.classList.remove('is-loading');
+        btn.innerHTML = orig;
+        btn.style.pointerEvents = '';
+        showToast('处理时间较长，请稍后手动刷新页面', 'error');
+      } else {
+        document.getElementById('procToast').textContent = '正在生成报表... (' + (attempts*2) + '秒)';
+      }
+    } catch(e) {}
+  }, 2000);
+}
+
+</script>
+{% endblock %}

@@ -1,0 +1,501 @@
+{% extends "base.html" %}
+{% block title %}Dividend Notifier — 选股设置{% endblock %}
+
+{% block extra_head %}
+<style>
+.mode-switch { display:flex; gap:4px; margin-bottom:10px; background:rgba(118,118,128,0.12); border-radius:999px; padding:4px; overflow-x:auto; }
+.mode-btn { flex:1; min-height:38px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:8px 12px; border:none; background:none; border-radius:999px; font-size:12px; font-weight:700; cursor:pointer; color:var(--text-secondary); transition:all 0.15s; white-space:nowrap; }
+.mode-btn.active { background:var(--card-bg); color:var(--primary); box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+.mode-btn:hover:not(.active) { color:var(--text); }
+.mode-hint { font-size:11px; color:var(--text-muted); margin-bottom:14px; line-height:1.5; }
+.search-box { display:flex; gap:8px; margin-bottom:10px; }
+.search-input { flex:1; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:#fafafa; }
+.search-input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(26,58,92,0.08); }
+.search-results { margin-bottom:12px; }
+.search-results-label { font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:6px; display:flex; align-items:center; gap:4px; }
+/* 搜索结果 — 浅蓝底色，和已选区分 */
+.search-item { display:flex; align-items:center; padding:10px 12px; background:#F0F4FF; border:1px solid #C8D6F0; border-radius:8px; margin-bottom:6px; gap:10px; font-size:13px; }
+.search-item .si-code { color:var(--text-muted); font-size:11px; min-width:56px; }
+.search-item .si-name { flex:1; font-weight:600; color:var(--text); }
+.search-item .si-price { font-size:12px; color:var(--text-secondary); }
+/* 已选股 — 白底 + 左边框 */
+.watchlist-divider { font-size:11px; font-weight:600; color:var(--text-muted); margin:14px 0 6px; display:flex; align-items:center; gap:6px; }
+.watchlist-item { display:flex; align-items:center; padding:10px 12px; background:var(--card-bg); border:1px solid var(--border); border-left:3px solid var(--primary); border-radius:4px; margin-bottom:6px; gap:10px; font-size:13px; }
+.watchlist-item .wl-code { color:var(--text-muted); font-size:11px; min-width:56px; }
+.watchlist-item .wl-name { flex:1; font-weight:600; }
+.watchlist-item .wl-yield { font-size:14px; font-weight:700; min-width:50px; text-align:right; }
+.remove-btn { min-width:32px; min-height:32px; display:inline-flex; align-items:center; justify-content:center; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px 6px; border-radius:8px; }
+.remove-btn:hover { color:var(--red); background:var(--red-bg); }
+.batch-box { width:100%; min-height:60px; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:13px; font-family:monospace; resize:vertical; background:#fafafa; margin-bottom:6px; }
+.prompt-box { width:100%; min-height:150px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; line-height:1.5; resize:vertical; background:#fafafa; }
+.prompt-box:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(26,58,92,0.08); }
+.range-inputs { display:grid; grid-template-columns:minmax(0, 1fr) 28px minmax(0, 1fr); align-items:center; gap:6px; }
+.range-sep { text-align:center; color:var(--text-muted); font-size:12px; }
+.empty-hint { text-align:center; padding:20px; color:var(--text-muted); font-size:13px; }
+.refresh-status {
+  display:none;
+  margin:12px 0 72px;
+  padding:12px 14px;
+  border:1px solid rgba(26,58,92,0.12);
+  border-radius:10px;
+  background:rgba(255,255,255,0.86);
+  box-shadow:0 8px 24px rgba(31,45,61,0.06);
+}
+.refresh-status.is-visible { display:block; }
+.refresh-status-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; }
+.refresh-status-title { font-size:13px; font-weight:700; color:var(--text); }
+.refresh-status-meta { font-size:12px; color:var(--text-muted); white-space:nowrap; }
+.refresh-progress { height:6px; background:rgba(118,118,128,0.14); border-radius:999px; overflow:hidden; }
+.refresh-progress-bar { width:14%; height:100%; border-radius:inherit; background:var(--primary); transition:width 0.25s ease; }
+.refresh-status-text { margin-top:8px; font-size:12px; color:var(--text-secondary); line-height:1.5; }
+.refresh-status-actions { display:none; margin-top:10px; gap:8px; flex-wrap:wrap; }
+.refresh-status.is-done .refresh-status-actions { display:flex; }
+.refresh-status.is-error { border-color:rgba(201,52,52,0.25); background:rgba(255,245,245,0.92); }
+.refresh-status.is-error .refresh-progress-bar { background:var(--red); }
+.refresh-status.is-done .refresh-progress-bar { background:var(--green); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+  <!-- 模式切换 -->
+  <div class="mode-switch" id="modeSwitch">
+    <button class="mode-btn {% if mode == 'filter' %}active{% endif %}" data-mode="filter">自动筛选</button>
+    <button class="mode-btn {% if mode == 'manual' %}active{% endif %}" data-mode="manual">手动池</button>
+    <button class="mode-btn {% if mode == 'both' %}active{% endif %}" data-mode="both">混合模式</button>
+    <button class="mode-btn {% if mode == 'ai' %}active{% endif %}" data-mode="ai">AI选股</button>
+  </div>
+  <div class="mode-hint" id="modeHint">
+    {% if mode == 'filter' %}
+    当前：只使用自动筛选结果，手动池不会参与
+    {% elif mode == 'manual' %}
+    当前：只使用手动池股票，不套用自动筛选条件
+    {% elif mode == 'both' %}
+    当前：自动筛选结果 + 手动池追加；若手动添加已在自动池，会提示重复
+    {% else %}
+    当前：先构建候选池，再调用你配置的 AI API 按提示词选股
+    {% endif %}
+  </div>
+
+  <!-- ===== 智能筛选表单 ===== -->
+  <div id="filterSection" style="display:{% if mode == 'filter' or mode == 'both' %}block{% else %}none{% endif %};">
+    <div class="card">
+      <h2>筛选条件</h2>
+      <div class="form-row">
+        <div class="form-group"><label>连续派现年数</label><div class="range-inputs"><input type="number" id="min_consecutive_years" value="{{ config.get('min_consecutive_years', 3) }}" min="0" step="1" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_consecutive_years" value="{{ config.get('max_consecutive_years', 0) }}" min="0" step="1" placeholder="最大"></div><div class="hint">0 表示不限；按上年财年已实施现金分红连续计算</div></div>
+        <div class="form-group"><label>市值范围 (亿元)</label><div class="range-inputs"><input type="number" id="min_market_cap" value="{{ config.get('min_market_cap', 0) }}" min="0" step="10" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_market_cap" value="{{ config.get('max_market_cap', 0) }}" min="0" step="10" placeholder="最大"></div></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>股息率范围 (%)</label><div class="range-inputs"><input type="number" id="min_dividend_yield" value="{{ config.get('min_dividend_yield', 0) }}" min="0" step="0.5" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_dividend_yield" value="{{ config.get('max_dividend_yield', 0) }}" min="0" step="0.5" placeholder="最大"></div><div class="hint">按上年财年已实施现金分红 / 当前价计算</div></div>
+        <div class="form-group"><label>股价范围</label><div class="range-inputs"><input type="number" id="min_latest_price" value="{{ config.get('min_latest_price', 0) }}" min="0" step="0.1" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_latest_price" value="{{ config.get('max_latest_price', 0) }}" min="0" step="0.1" placeholder="最大"></div></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>上年每股分红范围 (元)</label><div class="range-inputs"><input type="number" id="min_annual_dividend" value="{{ config.get('min_annual_dividend', 0) }}" min="0" step="0.1" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_annual_dividend" value="{{ config.get('max_annual_dividend', 0) }}" min="0" step="0.1" placeholder="最大"></div></div>
+        <div class="form-group"><label>YTD涨跌幅范围 (%)</label><div class="range-inputs"><input type="number" id="min_ytd_return" value="{{ config.get('min_ytd_return', 0) }}" step="1" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_ytd_return" value="{{ config.get('max_ytd_return', 0) }}" step="1" placeholder="最大"></div><div class="hint">可填负数，例如 -20 至 30</div></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>市盈率 PE 范围</label><div class="range-inputs"><input type="number" id="min_pe_ratio" value="{{ config.get('min_pe_ratio', 0) }}" min="0" step="1" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_pe_ratio" value="{{ config.get('max_pe_ratio', 0) }}" min="0" step="1" placeholder="最大"></div></div>
+        <div class="form-group"><label>市净率 PB 范围</label><div class="range-inputs"><input type="number" id="min_pb_ratio" value="{{ config.get('min_pb_ratio', 0) }}" min="0" step="0.1" placeholder="最小"><span class="range-sep">至</span><input type="number" id="max_pb_ratio" value="{{ config.get('max_pb_ratio', 0) }}" min="0" step="0.1" placeholder="最大"></div></div>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="exclude_st" {% if config.get('exclude_st', 1) == 1 %}checked{% endif %}><span class="slider"></span></label>
+        <span style="font-size:14px;">排除 ST 股票</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== AI 选股 ===== -->
+  <div id="aiSection" style="display:{% if mode == 'ai' %}block{% else %}none{% endif %};">
+    <div class="card">
+      <h2>AI选股</h2>
+      <div class="form-row">
+        <div class="form-group"><label>API URL</label><input type="text" id="ai_api_url" value="{{ config.get('ai_api_url', '') }}" placeholder="https://api.openai.com/v1 或完整 /chat/completions"><div class="hint">兼容 OpenAI Chat Completions；填 /v1 会自动补 /chat/completions</div></div>
+        <div class="form-group"><label>模型名称</label><input type="text" id="ai_model" value="{{ config.get('ai_model', '') }}" placeholder="例如 gpt-4o-mini / deepseek-chat"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>API Key</label><input type="password" id="ai_api_key" value="{{ config.get('ai_api_key', '') }}" autocomplete="off" placeholder="本地保存到 SQLite"></div>
+        <div class="form-group"><label>最多选出</label><input type="number" id="ai_top_n" value="{{ config.get('ai_top_n', 30) }}" min="1" max="200" step="1"><div class="hint">AI 最终返回的股票数量上限</div></div>
+        <div class="form-group"><label>候选池上限</label><input type="number" id="ai_candidate_limit" value="{{ config.get('ai_candidate_limit', 250) }}" min="20" max="800" step="10"><div class="hint">发送给 AI 的候选股票数，越大越慢、越耗 token</div></div>
+      </div>
+      <div class="form-group">
+        <label>AI 选股提示词</label>
+        <textarea class="prompt-box" id="ai_prompt">{{ config.get('ai_prompt') or '你是A股红利策略选股助手。\n请从候选股票中选择更适合长期收息的标的，优先考虑：\n1. 股息率较高且连续派现年数稳定；\n2. 市值不要太小，避免流动性和财务风险过高；\n3. PE/PB 不要明显异常；\n4. 分红记录清晰，避免只因股价暴跌造成的虚高股息率。\n\n只返回 JSON，格式为：\n{\"codes\":[\"600000\",\"601398\"],\"reason\":\"一句话概括选择逻辑\"}\n不要返回候选池之外的代码。' }}</textarea>
+        <div class="hint">系统会把候选股票指标表附在提示词后，并校验 AI 返回的代码必须来自候选池</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 手动选股 ===== -->
+  <div id="manualSection" style="display:{% if mode == 'manual' or mode == 'both' %}block{% else %}none{% endif %};">
+    <div class="card">
+      <h2>我的自选股 (<span id="watchlistCount">0</span>只)</h2>
+
+      <!-- 搜索框 -->
+      <div class="search-box">
+        <input type="text" class="search-input" id="searchInput" placeholder="输入股票代码或名称搜索，输完点搜索或按回车..." onkeyup="if(event.key==='Enter')searchStocks()">
+        <button class="btn btn-primary" onclick="searchStocks()">搜索</button>
+      </div>
+
+      <!-- 搜索结果 -->
+      <div class="search-results" id="searchResults"></div>
+
+      <!-- 已选股列表 -->
+      <div id="watchlistContainer">
+        <div class="empty-hint">暂无自选股，在上面搜一只试试吧</div>
+      </div>
+
+      <div style="margin-top:8px;">
+        <span style="font-size:12px; color:var(--text-secondary);">批量粘贴：</span>
+        <textarea class="batch-box" id="batchInput" placeholder="每行一个代码&#10;600036&#10;601088&#10;600519"></textarea>
+        <button class="btn btn-outline btn-sm" onclick="batchAdd()">批量添加</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:60px;"></div>
+</div>
+
+<div class="page-container" style="padding-top:0;">
+  <div class="refresh-status" id="refreshStatusPanel" aria-live="polite">
+    <div class="refresh-status-head">
+      <div class="refresh-status-title" id="refreshStatusTitle">准备刷新报表</div>
+      <div class="refresh-status-meta" id="refreshStatusMeta">--</div>
+    </div>
+    <div class="refresh-progress"><div class="refresh-progress-bar" id="refreshProgressBar"></div></div>
+    <div class="refresh-status-text" id="refreshStatusText">保存配置后会在这里显示后台刷新进度。</div>
+    <div class="refresh-status-actions" id="refreshStatusActions">
+      <a class="btn btn-primary btn-sm" href="/reports">查看报表</a>
+      <button class="btn btn-outline btn-sm" type="button" onclick="hideRefreshStatus()">收起</button>
+    </div>
+  </div>
+</div>
+
+<div class="fixed-bar">
+  <button class="btn btn-primary" id="saveSettingsBtn" onclick="saveSettings()">保存配置并后台刷新</button>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+var currentMode = '{{ mode }}';
+var watchlistData = [];
+var refreshPollTimer = null;
+var refreshStartedAt = null;
+
+var modeHints = {
+  'filter': '当前：只使用自动筛选结果，手动池不会参与',
+  'manual': '当前：只使用手动池股票，不套用自动筛选条件',
+  'both': '当前：自动筛选结果 + 手动池追加；若手动添加已在自动池，会提示重复',
+  'ai': '当前：先构建候选池，再调用你配置的 AI API 按提示词选股'
+};
+
+// ---- 模式切换 ----
+document.getElementById('modeSwitch').addEventListener('click', async function(e) {
+  var btn = e.target.closest('.mode-btn');
+  if (!btn) return;
+  var mode = btn.dataset.mode;
+  currentMode = mode;
+
+  document.querySelectorAll('.mode-btn').forEach(function(b){b.classList.remove('active');});
+  btn.classList.add('active');
+  document.getElementById('filterSection').style.display = (mode==='filter'||mode==='both') ? 'block':'none';
+  document.getElementById('manualSection').style.display = (mode==='manual'||mode==='both') ? 'block':'none';
+  document.getElementById('aiSection').style.display = mode==='ai' ? 'block':'none';
+  document.getElementById('modeHint').textContent = modeHints[mode];
+
+  try {
+    await fetch('/api/watchlist/mode',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode})});
+  } catch(e) {}
+});
+
+// ---- 搜索 ----
+async function searchStocks() {
+  var q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+  document.getElementById('searchResults').innerHTML = '<div class="empty-hint">搜索中...</div>';
+  try {
+    var resp = await fetch('/api/search-stocks?q='+encodeURIComponent(q));
+    var results = await resp.json();
+    if (!results.length) {
+      document.getElementById('searchResults').innerHTML = '<div class="empty-hint">未找到匹配的股票，换个关键词试试？</div>';
+      return;
+    }
+    var html = '<div class="search-results-label">搜索结果</div>';
+    results.forEach(function(s){
+      html += '<div class="search-item">';
+      html += '<span class="si-code">'+s.code+'</span>';
+      html += '<span class="si-name">'+s.name+'</span>';
+      if (s.latest_price && s.latest_price > 0) {
+        html += '<span class="si-price">¥'+s.latest_price.toFixed(2)+'</span>';
+      }
+      html += '<button class="btn btn-outline btn-sm" onclick="addStock(\''+s.code+'\',\''+escapeHtml(s.name)+'\')">添加</button>';
+      html += '</div>';
+    });
+    document.getElementById('searchResults').innerHTML = html;
+  } catch(e) {
+    document.getElementById('searchResults').innerHTML = '<div class="empty-hint">搜索失败，请检查网络后重试</div>';
+  }
+}
+
+function escapeHtml(str) {
+  return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// ---- 添加股票 ----
+async function addStock(code, name) {
+  try {
+    var resp = await fetch('/api/watchlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code,name:name})});
+    var r = await resp.json();
+    if (r.status==='ok') {
+      showToast('已添加 '+code+' '+name, 'success');
+      loadWatchlist();
+    } else {
+      showToast(r.message, 'error');
+    }
+  } catch(e) { showToast('添加失败', 'error'); }
+}
+
+// ---- 删除股票 ----
+async function removeStock(code) {
+  try {
+    var resp = await fetch('/api/watchlist/'+code,{method:'DELETE'});
+    var r = await resp.json();
+    showToast(r.message, 'success');
+    loadWatchlist();
+  } catch(e) { showToast('删除失败', 'error'); }
+}
+
+// ---- 批量添加 ----
+async function batchAdd() {
+  var text = document.getElementById('batchInput').value.trim();
+  if (!text) return;
+  var codes = text.split(/[\n,;\s]+/).filter(function(c){return c.length>=6;});
+  if (!codes.length) { showToast('未识别到有效代码', 'error'); return; }
+  try {
+    var resp = await fetch('/api/watchlist/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes:codes})});
+    var r = await resp.json();
+    showToast(r.message, 'success');
+    document.getElementById('batchInput').value = '';
+    loadWatchlist();
+  } catch(e) { showToast('添加失败', 'error'); }
+}
+
+// ---- 加载自选股列表 ----
+async function loadWatchlist() {
+  try {
+    var resp = await fetch('/api/watchlist');
+    watchlistData = await resp.json();
+    document.getElementById('watchlistCount').textContent = watchlistData.length;
+    if (!watchlistData.length) {
+      document.getElementById('watchlistContainer').innerHTML = '<div class="empty-hint">暂无自选股，在上面搜一只试试吧</div>';
+      return;
+    }
+    var html = '<div class="watchlist-divider">已选股票 ('+watchlistData.length+'只)</div>';
+    watchlistData.forEach(function(s){
+      html += '<div class="watchlist-item">';
+      html += '<span class="wl-code">'+s.code+'</span>';
+      html += '<span class="wl-name">'+s.name+'</span>';
+      html += '<span class="wl-yield">'+ (s.dividend_yield ? s.dividend_yield.toFixed(2)+'%' : '--') +'</span>';
+      html += '<button class="remove-btn" onclick="removeStock(\''+s.code+'\')" title="移除" aria-label="移除 '+s.code+'">移除</button>';
+      html += '</div>';
+    });
+    document.getElementById('watchlistContainer').innerHTML = html;
+  } catch(e) {}
+}
+
+// ---- 保存筛选设置 ----
+function collectForm() {
+  function numberValue(id) {
+    var el = document.getElementById(id);
+    if (!el) return 0;
+    var val = parseFloat(el.value);
+    return Number.isFinite(val) ? val : 0;
+  }
+  function intValue(id) {
+    var el = document.getElementById(id);
+    if (!el) return 0;
+    var val = parseInt(el.value, 10);
+    return Number.isFinite(val) ? val : 0;
+  }
+  return {
+    min_consecutive_years: intValue('min_consecutive_years'),
+    max_consecutive_years: intValue('max_consecutive_years'),
+    min_market_cap: numberValue('min_market_cap'),
+    max_market_cap: numberValue('max_market_cap'),
+    min_dividend_yield: numberValue('min_dividend_yield'),
+    max_dividend_yield: numberValue('max_dividend_yield'),
+    min_latest_price: numberValue('min_latest_price'),
+    max_latest_price: numberValue('max_latest_price'),
+    min_annual_dividend: numberValue('min_annual_dividend'),
+    max_annual_dividend: numberValue('max_annual_dividend'),
+    min_ytd_return: numberValue('min_ytd_return'),
+    max_ytd_return: numberValue('max_ytd_return'),
+    min_pe_ratio: numberValue('min_pe_ratio'),
+    max_pe_ratio: numberValue('max_pe_ratio'),
+    min_pb_ratio: numberValue('min_pb_ratio'),
+    max_pb_ratio: numberValue('max_pb_ratio'),
+    exclude_st: document.getElementById('exclude_st').checked?1:0,
+    ai_api_url: document.getElementById('ai_api_url').value.trim(),
+    ai_api_key: document.getElementById('ai_api_key').value.trim(),
+    ai_model: document.getElementById('ai_model').value.trim(),
+    ai_prompt: document.getElementById('ai_prompt').value.trim(),
+    ai_top_n: parseInt(document.getElementById('ai_top_n').value)||30,
+    ai_candidate_limit: parseInt(document.getElementById('ai_candidate_limit').value)||250,
+  };
+}
+
+async function saveSettings() {
+  var data = collectForm();
+  var btn = document.getElementById('saveSettingsBtn');
+  var orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+  btn.textContent = '保存中...';
+  try {
+    var resp = await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    var r = await resp.json();
+    if (!resp.ok) {
+      showToast(r.message, 'error');
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+      btn.innerHTML = orig;
+      return;
+    }
+
+    showToast('配置已保存，已开始后台刷新', 'success');
+    btn.textContent = '启动刷新...';
+    await triggerReportRefresh(btn, orig);
+  } catch(e) {
+    showToast('保存失败: '+e.message,'error');
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    btn.innerHTML = orig;
+  }
+}
+
+async function triggerReportRefresh(btn, orig) {
+  try {
+    var resp = await fetch('/api/trigger', {method:'POST'});
+    var r = await resp.json();
+    if (!resp.ok) {
+      showToast(r.message || '刷新启动失败', 'error');
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+      btn.innerHTML = orig;
+      return;
+    }
+    showToast(r.message || '刷新已在后台启动', 'success');
+    if (r.job_id) {
+      startRefreshProgress(r.job_id);
+    } else {
+      showRefreshStatus('刷新已启动', '正在后台生成报表，请稍后查看报表中心', 35, '运行中');
+    }
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    btn.innerHTML = orig;
+  } catch(e) {
+    showToast('刷新启动失败: '+e.message, 'error');
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    btn.innerHTML = orig;
+  }
+}
+
+function formatDuration(ms) {
+  if (!ms || ms < 0) return '0秒';
+  var sec = Math.round(ms / 1000);
+  if (sec < 60) return sec + '秒';
+  return Math.floor(sec / 60) + '分' + (sec % 60) + '秒';
+}
+
+function showRefreshStatus(title, text, progress, meta, state) {
+  var panel = document.getElementById('refreshStatusPanel');
+  var titleEl = document.getElementById('refreshStatusTitle');
+  var textEl = document.getElementById('refreshStatusText');
+  var metaEl = document.getElementById('refreshStatusMeta');
+  var bar = document.getElementById('refreshProgressBar');
+  panel.classList.add('is-visible');
+  panel.classList.toggle('is-error', state === 'error');
+  panel.classList.toggle('is-done', state === 'done');
+  titleEl.textContent = title;
+  textEl.textContent = text;
+  metaEl.textContent = meta || '';
+  bar.style.width = Math.max(8, Math.min(100, progress || 8)) + '%';
+}
+
+function hideRefreshStatus() {
+  var panel = document.getElementById('refreshStatusPanel');
+  panel.classList.remove('is-visible', 'is-error', 'is-done');
+}
+
+function startRefreshProgress(jobId) {
+  refreshStartedAt = Date.now();
+  if (refreshPollTimer) clearInterval(refreshPollTimer);
+  showRefreshStatus('正在刷新报表', '已提交后台任务，正在获取行情与分红数据...', 18, '0秒', 'running');
+
+  var attempts = 0;
+  refreshPollTimer = setInterval(async function() {
+    attempts++;
+    var elapsed = Date.now() - refreshStartedAt;
+    var softProgress = Math.min(88, 18 + attempts * 7);
+    try {
+      var resp = await fetch('/api/job-status/' + jobId);
+      var job = await resp.json();
+      if (!resp.ok) {
+        showRefreshStatus('无法读取刷新进度', job.message || '任务状态不存在', 100, formatDuration(elapsed), 'error');
+        clearInterval(refreshPollTimer); refreshPollTimer = null;
+        return;
+      }
+
+      if (job.status === 'success') {
+        clearInterval(refreshPollTimer); refreshPollTimer = null;
+        var durationText = formatDuration(job.duration_ms || elapsed);
+        showRefreshStatus(
+          '报表已刷新完成',
+          '本次筛选得到 ' + (job.stock_count || 0) + ' 只标的，报表已经重新生成。',
+          100,
+          durationText,
+          'done'
+        );
+        showToast('报表刷新完成：' + (job.stock_count || 0) + '只', 'success');
+      } else if (job.status === 'failed') {
+        clearInterval(refreshPollTimer); refreshPollTimer = null;
+        showRefreshStatus(
+          '刷新失败',
+          job.error_msg || '后台任务失败，请调整条件或稍后重试。',
+          100,
+          formatDuration(job.duration_ms || elapsed),
+          'error'
+        );
+        showToast(job.error_msg || '刷新失败', 'error');
+      } else {
+        showRefreshStatus(
+          '正在刷新报表',
+          '后台仍在处理：获取数据、筛选股票、生成 Excel/PDF 报表...',
+          softProgress,
+          formatDuration(elapsed),
+          'running'
+        );
+      }
+    } catch(e) {
+      showRefreshStatus(
+        '正在刷新报表',
+        '后台任务可能仍在运行，暂时无法读取状态...',
+        softProgress,
+        formatDuration(elapsed),
+        'running'
+      );
+    }
+
+    if (attempts >= 60 && refreshPollTimer) {
+      clearInterval(refreshPollTimer); refreshPollTimer = null;
+      showRefreshStatus('刷新时间较长', '任务可能仍在后台运行，可以稍后进入报表中心查看。', 92, formatDuration(elapsed), 'error');
+    }
+  }, 1000);
+}
+
+// 加载
+loadWatchlist();
+</script>
+{% endblock %}

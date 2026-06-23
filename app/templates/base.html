@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Dividend Notifier{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<!-- 移动端汉堡按钮 -->
+<button class="hamburger" onclick="toggleSidebar()" aria-label="菜单"></button>
+
+<!-- 左侧菜单 -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">红利股日报</div>
+  <nav class="sidebar-nav">
+    <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}"><span>仪表盘</span></a>
+    <a href="/reports" class="{{ 'active' if request.url.path == '/reports' else '' }}"><span>报表中心</span></a>
+    <a href="/notifications" class="{{ 'active' if request.url.path == '/notifications' else '' }}"><span>通知设置</span></a>
+    <a href="/stock-pick" class="{{ 'active' if request.url.path == '/stock-pick' else '' }}"><span>选股设置</span></a>
+  </nav>
+</aside>
+
+<!-- 移动端菜单遮罩 -->
+<div class="sidebar-overlay" id="overlay" onclick="toggleSidebar()"></div>
+
+<!-- 右侧内容区 -->
+<main class="main-content">
+
+  <!-- 顶部状态条 (JS 动态刷新) -->
+  <div class="status-bar" id="statusBar">
+    <div class="status-item">
+      <div class="status-info">
+        <span class="status-label">定时推送</span>
+        <span class="status-value" id="schedStatus">加载中...</span>
+      </div>
+    </div>
+    <div class="status-item">
+      <div class="status-info">
+        <span class="status-label">最近推送</span>
+        <span class="status-value" id="lastPushStatus">加载中...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 页面内容 -->
+  {% block content %}{% endblock %}
+
+</main>
+
+<!-- Toast 提示 -->
+<div class="toast" id="toast"></div>
+
+<!-- ==========================================================
+     公共 JS：菜单切换 + 状态条刷新 + Toast
+     ========================================================== -->
+<script>
+// ---- 侧边栏切换 (移动端) ----
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('show');
+}
+
+// ---- Toast 提示 ----
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  setTimeout(function() { t.className = 'toast'; }, 3000);
+}
+
+// ---- 状态条刷新 ----
+async function refreshStatus() {
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+
+    // 定时推送状态
+    const s = data.schedule;
+    let schedHTML = '';
+    if (s.enabled) {
+      schedHTML = '<span class="status-ok"><span class="status-dot ok"></span>已开启 · ' + s.time + '</span>';
+      if (s.next_run) {
+        schedHTML += '<br><small>下次: ' + s.next_run + '</small>';
+      }
+    } else {
+      schedHTML = '<span class="status-muted"><span class="status-dot muted"></span>未开启</span>';
+    }
+    document.getElementById('schedStatus').innerHTML = schedHTML;
+
+    // 最近推送
+    const lp = data.last_push;
+    let pushHTML = '';
+    if (lp) {
+      let icon = '';
+      if (lp.status === 'success') icon = '<span class="status-dot ok"></span>';
+      else if (lp.status === 'failed') icon = '<span class="status-dot warn"></span>';
+      else icon = '<span class="status-dot muted"></span>';
+      pushHTML = icon + ' ' + lp.date + ' · ' + lp.stock_count + '只';
+      if (lp.duration_ms) {
+        pushHTML += '<br><small>' + (lp.duration_ms/1000).toFixed(1) + '秒</small>';
+      }
+    } else {
+      pushHTML = '暂无记录';
+    }
+    document.getElementById('lastPushStatus').innerHTML = pushHTML;
+  } catch(e) {
+    // 静默失败
+  }
+}
+
+// 打开页面就刷新一次，之后每 30 秒刷新
+refreshStatus();
+setInterval(refreshStatus, 30000);
+
+// ---- 移动端：点菜单项后自动收起 ----
+document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+  a.addEventListener('click', function() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('overlay').classList.remove('show');
+  });
+});
+</script>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

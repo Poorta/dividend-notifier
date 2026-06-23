@@ -1,0 +1,60 @@
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite*
+data/cache/*
+!data/.gitkeep
+!data/cache/.gitkeep
+
+# 输出文件
+output/*
+!output/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+.venv-build/
+.cache-build/
+.local-tools/
+
+# IDE
+.vscode/
+.idea/
+.workbuddy/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# macOS
+.DS_Store
+
+# 临时文件
+*.tmp
+*.bak
+
+# 打包产物
+packaging/build/
+packaging/dist/
+packaging/dmg-stage/
+packaging/*.spec.bak
+
+# 本地隐私备份
+private_backup_before_release*/

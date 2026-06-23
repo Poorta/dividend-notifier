@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Dividend Notifier — 通知设置{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+  <div class="card">
+    <h2>邮箱配置</h2>
+    <div class="form-group">
+      <label>发件邮箱</label>
+      <input type="email" id="mail_username" value="{{ config.get('mail_username', '') }}" placeholder="your@qq.com">
+    </div>
+    <div class="form-group">
+      <label>SMTP 授权码</label>
+      <input type="password" id="mail_password" value="{{ config.get('mail_password', '') }}" placeholder="QQ邮箱→设置→账户→POP3/SMTP">
+      <div class="hint">不是QQ密码，是SMTP独立授权码</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>SMTP 服务器</label><input type="text" id="mail_host" value="{{ config.get('mail_host', 'smtp.qq.com') }}"></div>
+      <div class="form-group form-group-narrow"><label>端口</label><input type="number" id="mail_port" value="{{ config.get('mail_port', 465) }}"></div>
+    </div>
+    <div class="form-group">
+      <label>收件人 (多个用逗号分隔)</label>
+      <input type="text" id="recipients" value="{{ config.get('recipients', '') }}" placeholder="a@qq.com, b@163.com">
+    </div>
+    <button class="btn btn-success" onclick="testEmail()" style="margin-top:8px;">发送测试邮件</button>
+  </div>
+
+  <div class="card">
+    <h2>每日推送</h2>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="schedule_enabled" {% if config.get('schedule_enabled', 0) == 1 %}checked{% endif %}><span class="slider"></span></label>
+      <span style="font-size:14px;">定时推送</span>
+    </div>
+    <div class="form-row">
+      <div class="form-group form-group-narrow">
+        <label>推送时间</label>
+        <select id="send_hour">
+          {% for h in range(0, 24) %}
+          <option value="{{ h }}" {% if config.get('send_hour', 8) == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group form-group-narrow">
+        <label>&nbsp;</label>
+        <select id="send_minute">
+          {% for m in [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55] %}
+          <option value="{{ m }}" {% if config.get('send_minute', 30) == m %}selected{% endif %}>{{ "%02d"|format(m) }}分</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="hint">交易日自动执行，非交易日自动跳过</div>
+  </div>
+
+  <button class="btn btn-outline btn-sm" onclick="toggleAdvanced()" style="margin-bottom: 14px;" id="btnAdvanced">高级设置 (颜色规则 / 输出格式)</button>
+
+  <div id="advancedSettings" style="display:none;">
+    <div class="card">
+      <h2>颜色规则</h2>
+      <div class="form-row">
+        <div class="form-group"><label>股息率 ≥ 此值标红</label><input type="number" id="color_div_yield_red" value="{{ config.get('color_div_yield_red', 5.0) }}" min="0" step="0.1"></div>
+        <div class="form-group"><label>股息率 &lt; 此值标绿</label><input type="number" id="color_div_yield_green" value="{{ config.get('color_div_yield_green', 3.0) }}" min="0" step="0.1"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>YTD ≥ 此值标红</label><input type="number" id="color_ytd_red" value="{{ config.get('color_ytd_red', 0.0) }}" step="0.1"></div>
+        <div class="form-group"><label>YTD &lt; 此值标绿</label><input type="number" id="color_ytd_green" value="{{ config.get('color_ytd_green', -5.0) }}" step="0.1"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>连续派现年 ≥ 此值标红</label><input type="number" id="color_consecutive_red" value="{{ config.get('color_consecutive_red', 10) }}" min="0" step="1"></div>
+        <div class="form-group"><label>连续派现年 &lt; 此值标绿</label><input type="number" id="color_consecutive_green" value="{{ config.get('color_consecutive_green', 5) }}" min="0" step="1"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>输出格式</h2>
+      <div class="form-group">
+        <select id="output_format">
+          <option value="xlsx,pdf" {% if config.get('output_format', 'xlsx,pdf') == 'xlsx,pdf' %}selected{% endif %}>Excel + PDF（推荐）</option>
+          <option value="xlsx" {% if config.get('output_format') == 'xlsx' %}selected{% endif %}>仅 Excel</option>
+          <option value="pdf" {% if config.get('output_format') == 'pdf' %}selected{% endif %}>仅 PDF</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:60px;"></div>
+</div>
+
+<div class="fixed-bar">
+  <button class="btn btn-primary" onclick="saveSettings()">保存配置</button>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function toggleAdvanced() {
+  var d = document.getElementById('advancedSettings');
+  var b = document.getElementById('btnAdvanced');
+  if (d.style.display === 'none') { d.style.display='block'; b.innerHTML='收起高级设置'; }
+  else { d.style.display='none'; b.innerHTML='高级设置 (颜色规则 / 输出格式)'; }
+}
+
+function collectForm() {
+  return {
+    mail_username: document.getElementById('mail_username').value,
+    mail_password: document.getElementById('mail_password').value,
+    mail_host: document.getElementById('mail_host').value,
+    mail_port: parseInt(document.getElementById('mail_port').value)||465,
+    recipients: document.getElementById('recipients').value,
+    send_hour: parseInt(document.getElementById('send_hour').value),
+    send_minute: parseInt(document.getElementById('send_minute').value),
+    schedule_enabled: document.getElementById('schedule_enabled').checked?1:0,
+    color_div_yield_red: parseFloat(document.getElementById('color_div_yield_red').value)||5.0,
+    color_div_yield_green: parseFloat(document.getElementById('color_div_yield_green').value)||3.0,
+    color_ytd_red: parseFloat(document.getElementById('color_ytd_red').value)||0.0,
+    color_ytd_green: parseFloat(document.getElementById('color_ytd_green').value)||-5.0,
+    color_consecutive_red: parseInt(document.getElementById('color_consecutive_red').value)||10,
+    color_consecutive_green: parseInt(document.getElementById('color_consecutive_green').value)||5,
+    output_format: document.getElementById('output_format').value,
+  };
+}
+
+async function saveSettings() {
+  try {
+    var resp = await fetch('/api/settings', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(collectForm())});
+    var r = await resp.json();
+    showToast(resp.ok ? '配置已保存' : r.message, resp.ok?'success':'error');
+    if(resp.ok) refreshStatus();
+  } catch(e) { showToast('保存失败: '+e.message,'error'); }
+}
+
+async function testEmail() {
+  showToast('正在发送...','success');
+  try {
+    var resp = await fetch('/api/settings/test-email',{method:'POST'});
+    var r = await resp.json();
+    showToast(r.message, resp.ok?'success':'error');
+  } catch(e) { showToast('发送失败: '+e.message,'error'); }
+}
+</script>
+{% endblock %}

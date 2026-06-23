@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}Dividend Notifier — 仪表盘{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+  <!-- 未配置提醒 -->
+  {% if needs_config %}
+  <div class="banner banner-warn">
+    <span>还没有配置邮箱，报表不会发到邮箱（但仍可在网页查看）。<a href="/notifications">去设置邮箱</a></span>
+  </div>
+  {% endif %}
+
+  <!-- 推送失败提醒 -->
+  {% if last_push_failed %}
+  <div class="banner banner-fail">
+    <span>最近一次推送失败！请检查邮箱配置和网络，<a href="/notifications">去检查</a></span>
+  </div>
+  {% endif %}
+
+  <!-- 操作按钮 -->
+  <div class="btn-group">
+    <button class="btn btn-primary" onclick="triggerJob()">刷新数据</button>
+    <a href="/reports" class="btn btn-outline">查看报表</a>
+  </div>
+
+  <!-- 定时推送快捷开关 -->
+  <div class="card schedule-toggle-card" style="padding: 10px 16px; display: flex; align-items: center; gap: 12px;" id="scheduleToggleCard">
+    <div style="flex:1; min-width:0;">
+      <div style="font-size:13px; font-weight:600;">定时推送</div>
+      <div style="font-size:11px; color:var(--text-secondary);" id="scheduleToggleTime">每日 {{ "%02d:%02d"|format(send_hour, send_minute) }}</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="scheduleToggle" {% if schedule_enabled %}checked{% endif %} onchange="toggleSchedule()">
+      <span class="slider"></span>
+    </label>
+    <span id="scheduleToggleLabel" style="font-size:12px; font-weight:600; min-width:36px;">{{ 'ON' if schedule_enabled else 'OFF' }}</span>
+  </div>
+
+  <!-- 标签页 -->
+  <div class="tabs" id="tabs">
+    <button class="active" data-tab="overview">今日概览</button>
+    <button data-tab="history">推送历史</button>
+  </div>
+
+  <!-- ===== 标签1: 今日概览 ===== -->
+  <div class="tab-content active" id="tab-overview">
+    {% if top_stocks %}
+    <!-- 统计卡片 -->
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value">{{ stock_count }}</div>
+        <div class="stat-label">覆盖标的</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ industry_count }}</div>
+        <div class="stat-label">行业数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ avg_yield }}%</div>
+        <div class="stat-label">平均股息率</div>
+      </div>
+    </div>
+
+    <!-- TOP3 速览卡片 -->
+    <div class="card" style="padding: 14px 18px; margin-bottom: 12px;">
+      <div class="top3-row">
+        {% for s in top_stocks[:3] %}
+        <a href="/reports" class="top3-item">
+          <span class="top3-rank">{{ loop.index }}</span>
+          <span class="top3-name">{{ s.name }}</span>
+          <span class="top3-code">{{ s.code }}</span>
+          <span class="top3-yield {% if s.dividend_yield and s.dividend_yield >= 5 %}text-red{% elif s.dividend_yield and s.dividend_yield < 3 %}text-green{% endif %}">
+            {{ "%.2f"|format(s.dividend_yield or 0) }}%
+          </span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- TOP10 表格 -->
+    <div class="card">
+      <h2>股息率排序 TOP10</h2>
+      <div class="table-wrapper">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>名称</th><th>代码</th>
+              <th>股息率%</th><th>YTD%</th>
+              <th>分红明细</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in top_stocks %}
+            <tr>
+              <td>{{ s.name }}</td>
+              <td>{{ s.code }}</td>
+              <td class="{% if s.dividend_yield and s.dividend_yield >= 5 %}text-red{% elif s.dividend_yield and s.dividend_yield < 3 %}text-green{% endif %}">
+                {{ "%.2f"|format(s.dividend_yield or 0) }}%
+              </td>
+              <td class="{% if s.ytd_return and s.ytd_return > 0 %}text-red{% elif s.ytd_return and s.ytd_return < -5 %}text-green{% endif %}">
+                {{ "%.2f"|format(s.ytd_return or 0) }}%
+              </td>
+              <td>{{ s.dividend_detail }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="card banner-empty">
+      今日尚未生成报表<br>
+      <span style="font-size:12px; color: var(--text-muted);">请点击「手动触发推送」按钮启动数据流水线</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ===== 标签2: 推送历史 ===== -->
+  <div class="tab-content" id="tab-history">
+    {% if recent_logs %}
+    <div class="card">
+      <h2>推送历史</h2>
+      <div class="history-list">
+        {% for log in recent_logs %}
+        <div class="history-item">
+          <div class="history-left">
+            <span class="status-dot {% if log.status == 'success' %}ok{% elif log.status == 'failed' %}warn{% else %}muted{% endif %}"></span>
+            <div>
+              <span class="history-date">{{ log.date }}</span>
+              <span class="history-meta">{{ log.stock_count }}只标的</span>
+            </div>
+          </div>
+          <span class="badge {% if log.status == 'success' %}badge-success{% elif log.status == 'failed' %}badge-failed{% else %}badge-pending{% endif %}">
+            {% if log.status == 'success' %}成功
+            {% elif log.status == 'failed' %}失败
+            {% else %}{{ log.status }}
+            {% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="card banner-empty">暂无推送记录</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Processing toast -->
+<div class="processing-toast" id="procToast">正在获取最新数据，请稍候...</div>
+
+<script>
+// ---- 标签页切换 ----
+document.getElementById('tabs').addEventListener('click', function(e) {
+  if (e.target.tagName !== 'BUTTON') return;
+  const tabName = e.target.dataset.tab;
+
+  // 切换按钮状态
+  this.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
+  e.target.classList.add('active');
+
+  // 切换内容
+  document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+  document.getElementById('tab-' + tabName).classList.add('active');
+});
+
+// ---- 手动触发 ----
+var pollTimer = null;
+
+async function triggerJob() {
+  var btn = document.querySelector('.btn-primary');
+  var orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+  btn.textContent = '启动中...';
+
+  try {
+    var resp = await fetch('/api/trigger', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      showProcessing(true);
+      btn.textContent = '刷新中...';
+      startPolling(btn, orig);
+    } else {
+      showToast('触发失败: ' + data.message, 'error');
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+      btn.innerHTML = orig;
+    }
+  } catch(e) {
+    showToast('触发失败: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+    btn.innerHTML = orig;
+  }
+}
+
+function showProcessing(show) {
+  var toast = document.getElementById('procToast');
+  toast.style.display = show ? 'block' : 'none';
+}
+
+function startPolling(btn, orig) {
+  var attempts = 0;
+  if (pollTimer) clearInterval(pollTimer);
+
+  pollTimer = setInterval(async function() {
+    attempts++;
+    try {
+      var resp = await fetch('/api/status');
+      var status = await resp.json();
+
+      if (status.last_push && status.last_push.status !== 'pending' && status.last_push.status !== 'running') {
+        clearInterval(pollTimer); pollTimer = null;
+        showProcessing(false);
+        btn.disabled = false; btn.classList.remove('is-loading'); btn.innerHTML = orig;
+        refreshStatus();
+        setTimeout(function() { location.reload(); }, 500);
+      } else if (attempts >= 20) {
+        clearInterval(pollTimer); pollTimer = null;
+        showProcessing(false);
+        btn.disabled = false; btn.classList.remove('is-loading'); btn.innerHTML = orig;
+        showToast('处理时间较长，请稍后手动刷新', 'error');
+      } else {
+        document.getElementById('procToast').textContent = '正在处理... (' + (attempts*2) + '秒)';
+      }
+    } catch(e) {}
+  }, 2000);
+}
+
+// ---- 定时推送快捷开关 ----
+async function toggleSchedule() {
+  var cb = document.getElementById('scheduleToggle');
+  var label = document.getElementById('scheduleToggleLabel');
+  cb.disabled = true;
+  var enabled = cb.checked ? 1 : 0;
+  label.textContent = '...';
+
+  try {
+    var resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({schedule_enabled: enabled}),
+    });
+    var data = await resp.json();
+    if (resp.ok) {
+      label.textContent = enabled ? 'ON' : 'OFF';
+      showToast(enabled ? '定时推送已开启' : '定时推送已关闭', 'success');
+      refreshStatus();
+    } else {
+      cb.checked = !cb.checked; // 恢复
+      label.textContent = cb.checked ? 'ON' : 'OFF';
+      showToast('操作失败', 'error');
+    }
+  } catch(e) {
+    cb.checked = !cb.checked;
+    label.textContent = cb.checked ? 'ON' : 'OFF';
+    showToast('操作失败', 'error');
+  }
+  cb.disabled = false;
+}
+
+</script>
+{% endblock %}
