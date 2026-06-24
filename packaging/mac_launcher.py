@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import webbrowser
+import os
 from pathlib import Path
 from traceback import format_exc
 
@@ -18,9 +19,21 @@ import uvicorn
 
 
 HOST = "127.0.0.1"
-LOG_DIR = Path.home() / "Library" / "Logs" / "Dividend Notifier"
+
+
+def _log_dir() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Logs" / "Dividend Notifier"
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+        return Path(base) / "Dividend Notifier" / "logs"
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "dividend-notifier"
+
+
+LOG_DIR = _log_dir()
 LOG_FILE = LOG_DIR / "launcher.log"
 _server_error = ""
+_stdio_log_handle = None
 
 
 def _log(message: str) -> None:
@@ -64,6 +77,7 @@ def _run_server(port: int) -> None:
             port=port,
             log_level="info",
             access_log=False,
+            log_config=None,
         )
     except BaseException:
         _server_error = format_exc()
@@ -71,7 +85,24 @@ def _run_server(port: int) -> None:
         _log(_server_error)
 
 
+def _ensure_stdio() -> None:
+    """Windowed PyInstaller apps on Windows can have stdout/stderr set to None."""
+    global _stdio_log_handle
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        _stdio_log_handle = LOG_FILE.open("a", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = _stdio_log_handle
+        if sys.stderr is None:
+            sys.stderr = _stdio_log_handle
+    except Exception:
+        pass
+
+
 def main() -> None:
+    _ensure_stdio()
     _log("Launcher started")
     try:
         port = _find_port()
